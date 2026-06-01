@@ -1,0 +1,17 @@
+# Core data
+pandas==2.1.4
+numpy==1.26.4
+
+# ML
+xgboost==2.0.3
+scikit-learn==1.4.0
+
+# Live feed (tomorrow)
+upstox-python-sdk==2.0.0
+websocket-client==1.7.0
+requests==2.31.0
+flask==3.0.0
+
+# Utilities
+python-dotenv==1.0.0
+pytz==2024.1
