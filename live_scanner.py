@@ -32,6 +32,20 @@ from src.pipeline import process_day
 
 load_dotenv()
 
+# ── Telegram config ───────────────────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN = "8725357996:AAHJbUVxY6huX8SEgUFhRCYdzIW8MgqXpLg"
+TELEGRAM_CHAT_ID   = "7804862044"
+
+def send_telegram(msg: str):
+    """Send message to Telegram."""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
+        )
+    except Exception as e:
+        print(f"Telegram error: {e}")
+
 # ── config ────────────────────────────────────────────────────────────────────
 MODEL_PATH   = "models/v2/signal_model_v2.pkl"
 LOG_DIR      = "logs"
@@ -39,8 +53,8 @@ DATA_DIR     = "data/raw"
 POLL_SECONDS = 60
 START_HOUR   = 9
 START_MIN    = 45
-END_HOUR     = 14
-END_MIN      = 30
+END_HOUR     = 15
+END_MIN      = 15
 
 # ── colours ───────────────────────────────────────────────────────────────────
 GREEN  = "\033[92m"
@@ -140,6 +154,31 @@ def print_signal(row, is_new=True):
     if pred == 1:
         guidance = get_exit_guidance(pattern, prob)
         print(f"       Pattern: {pattern:<20}  Exit rule: {guidance}")
+
+        # Send Telegram notification
+        msg = (
+            f"🚨 <b>BUY SIGNAL — NIFTY</b>\n\n"
+            f"🕐 Time     : {row['time'][:5]}\n"
+            f"📈 Entry    : {row['entry']}\n"
+            f"🛑 SL       : {row['sl']}\n"
+            f"🎯 Target   : {row['tgt_1_3']} (1:3)\n"
+            f"⚡ Risk     : {row['risk_pts']} pts\n"
+            f"🔥 Prob     : {prob:.1%}\n"
+            f"📊 Pattern  : {pattern}\n"
+            f"📋 Exit rule: {guidance.replace(GREEN,'').replace(RED,'').replace(YELLOW,'').replace(RESET,'').replace(BOLD,'')}"
+        )
+        send_telegram(msg)
+
+def send_telegram(msg: str):
+    """Send BUY signal notification to Telegram."""
+    try:
+        import requests
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
+        )
+    except Exception as e:
+        print(f"{RED}Telegram error: {e}{RESET}")
 
 
 def save_signals_csv(df, date_str):
