@@ -41,3 +41,20 @@ Thumbs.db
 .idea/
 *.swp
 logs/
+# Datasets
+data/btc/datasets/
+data/nifty/datasets/
+data/nifty/raw/
+data/btc/raw/
+
+# Models (large pickle files)
+models/btc/
+models/nifty/
+
+# Logs
+logs/
+
+# Temp files
+*.parquet
+*.pkl
+pip-tmp/
