@@ -8,12 +8,13 @@ Sends Telegram alerts on BUY signals.
 Poll every 60 seconds - 24/7.
 """
 
-import os, sys, time, pickle, requests
+import os, sys, time, pickle, argparse, requests
 import pandas as pd
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from strategies.btc.pipeline import process_chunk
+
 
 # -- CONFIG -------------------------------------------------------------------
 MODEL_PATH         = "models/btc/v1/signal_model_btc_v1_rr3.pkl"
@@ -21,8 +22,31 @@ TELEGRAM_BOT_TOKEN = "8725357996:AAHJbUVxY6huX8SEgUFhRCYdzIW8MgqXpLg"
 TELEGRAM_CHAT_ID   = "7804862044"
 POLL_SECONDS       = 60
 CANDLES_NEEDED     = 300
-RISK_FILTER        = 0.15
-THRESHOLD          = 0.50
+
+# -- ARGS ---------------------------------------------------------------------
+parser = argparse.ArgumentParser()
+parser.add_argument("--feed",      default="binance", choices=["binance","delta"])
+parser.add_argument("--threshold", type=float, default=0.50)
+parser.add_argument("--risk",      type=float, default=0.15)
+args = parser.parse_args()
+
+FEED        = args.feed
+THRESHOLD   = args.threshold
+RISK_FILTER = args.risk
+
+args = parser.parse_args()
+
+FEED        = args.feed
+THRESHOLD   = args.threshold
+RISK_FILTER = args.risk
+
+# -- FEED SELECTION -----------------------------------------------------------
+if FEED == "delta":
+    from strategies.btc.feeds.delta_feed import get_candles
+    FEED_LABEL = "Delta Exchange"
+else:
+    from strategies.btc.feeds.binance_feed import get_candles
+    FEED_LABEL = "Binance"
 
 # -- COLOURS ------------------------------------------------------------------
 GREEN  = "\033[92m"
@@ -41,10 +65,6 @@ def send_telegram(msg):
         )
     except Exception as e:
         print("{}Telegram error: {}{}".format(RED, e, RESET))
-
-
-from strategies.btc.feeds.binance_feed import get_candles
-# from strategies.btc.feeds.delta_feed import get_candles  # switch here for Delta
 
 
 def score_signals(df_candles, model, feat_cols):
@@ -78,7 +98,7 @@ def main():
     print("\n{}{}".format(BOLD, "="*60))
     print("  BTC BB+EMA9 LIVE SCANNER  --  1:3 RR")
     print("{}{}".format("="*60, RESET))
-    print("  Symbol    : BTCUSDT (Binance)")
+    print("  Symbol    : BTCUSDT ({})".format(FEED_LABEL))
     print("  Timeframe : 1-min")
     print("  RR        : 1:3")
     print("  Threshold : {}".format(THRESHOLD))
@@ -111,6 +131,12 @@ def main():
     while True:
         try:
             df_candles = get_candles(CANDLES_NEEDED)
+
+            # Print OHLC every 5 minutes
+            now_min = datetime.utcnow().minute
+            if now_min % 5 == 0:
+                last = df_candles.iloc[-1]
+                print(f"\n  {last['datetime']}  O:{last['O']:.2f}  H:{last['H']:.2f}  L:{last['L']:.2f}  C:{last['C']:.2f}")
             df_scored  = score_signals(df_candles, model, feat_cols)
 
             if not df_scored.empty:
@@ -175,7 +201,26 @@ def main():
         except Exception as e:
             print("\n{}Error: {}{}".format(RED, e, RESET))
 
-        time.sleep(POLL_SECONDS)
+        # Update price display every 10s, but only scan every 60s
+        for _ in range(6):
+            time.sleep(10)
+            try:
+                df_price = get_candles(5)
+                price = float(df_price["C"].iloc[-1])
+                now   = datetime.utcnow().strftime("%H:%M:%S")
+                last_candle_time  = df_candles["datetime"].iloc[-1].strftime("%H:%M")
+                last_candle_close = float(df_candles["C"].iloc[-1])
+                print(
+                    "\r  [{} UTC]  {} BTC ${:,.0f}  |  Last candle: {} @ ${:,.0f}  |  {}BUY: {}{}  |  Skip: {}  |  Candles: {}   ".format(
+                        now, FEED_LABEL, price,
+                        last_candle_time, last_candle_close,
+                        GREEN, buy_count, RESET,
+                        skip_count, len(df_candles)
+                    ),
+                    end="", flush=True
+                )
+            except:
+                pass
 
 
 if __name__ == "__main__":
