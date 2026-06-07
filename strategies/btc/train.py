@@ -29,7 +29,9 @@ LOOKAHEAD = [
 
 META = [
     "datetime", "signal_type", "signal_direction",
-    "entry", "sl", "target_1_5", "risk_pts", "risk_pct", "label",
+    "entry", "sl", "target_1_5", "target_1_3",
+    "risk_pts", "risk_pct", "label", "label_1_3", "label_1_5",
+    "year",  # ← add this
 ]
 
 REMOVE = set(LOOKAHEAD + META)
