@@ -200,23 +200,54 @@ def _get_tf_features(tf_df, sig_dt, entry, sl, atr1m, direction, prefix):
 
     # For SELL signals flip directional features
     d = direction
+    # Previous high/low for distance features
+    prev_high = hist["H"].iloc[max(0,i-5):i].max() if i > 0 else hist.loc[i,"H"]
+    prev_low  = hist["L"].iloc[max(0,i-5):i].min() if i > 0 else hist.loc[i,"L"]
+    atr_tf    = g("atr14", atr1m) or atr1m
+
+    # BB lower breach magnitude
+    bb_l = hist.loc[i, "bb_lower"]
+    bb_l_prev = hist["L"].iloc[max(0,i-4):i+1].min()
+    bb_breach = (bb_l - bb_l_prev) / (atr_tf + 1e-9) if pd.notna(bb_l) else 0
+
+    # Lower wick ratio on this TF
+    cr = hist.loc[i,"H"] - hist.loc[i,"L"]
+    body_low = min(hist.loc[i,"O"], hist.loc[i,"C"])
+    lwr = (body_low - hist.loc[i,"L"]) / (cr + 1e-9) if cr > 0 else 0
+
+    # Room to 1:3 target before prev high resistance
+    risk_tf  = abs(entry - sl)
+    tgt3     = entry + risk_tf * 3 * d
+    room_tgt3 = (prev_high - tgt3) / (atr_tf + 1e-9) if d==1 else (tgt3 - prev_low) / (atr_tf + 1e-9)
+
+    # dist to prev high/low (ATR normalised)
+    dist_prev_high = (hist.loc[i,"C"] - prev_high) / (atr_tf + 1e-9) * d
+    dist_prev_low  = (hist.loc[i,"C"] - prev_low)  / (atr_tf + 1e-9) * d
+
+    
     feats = {
-        f"{prefix}_ema9_vs_ema21":       g("ema9_vs_ema21") * d,
-        f"{prefix}_ema21_vs_ema50":      g("ema21_vs_ema50") * d,
-        f"{prefix}_close_vs_ema9":       g("close_vs_ema9") * d,
-        f"{prefix}_ema9_slope":          g("ema9_slope") * d,
-        f"{prefix}_bb_pct_b":            g("bb_pct_b", 0.5) if d==1 else 1 - g("bb_pct_b", 0.5),
-        f"{prefix}_bb_width":            g("bb_width"),
-        f"{prefix}_rsi14":               g("rsi14", 50) if d==1 else 100 - g("rsi14", 50),
-        f"{prefix}_stoch_k":             g("stoch_k", 50) if d==1 else 100 - g("stoch_k", 50),
-        f"{prefix}_will_r":              g("will_r", -50) if d==1 else -100 - g("will_r", -50),
-        f"{prefix}_is_bullish":          int(hist.loc[i, "is_bull"]) if d==1 else 1 - int(hist.loc[i, "is_bull"]),
-        f"{prefix}_body_ratio":          g("body_ratio"),
-        f"{prefix}_range_vs_atr":        g("range_vs_atr", 1),
-        f"{prefix}_close_pos":           g("close_pos") if d==1 else 1 - g("close_pos"),
-        f"{prefix}_signal_active":       sig_active,
-        f"{prefix}_vol_ratio":           g("vol_ratio", 1),
-        f"{prefix}_adx":                 g("adx"),
+        f"{prefix}_ema9_vs_ema21":         g("ema9_vs_ema21") * d,
+        f"{prefix}_ema21_vs_ema50":        g("ema21_vs_ema50") * d,
+        f"{prefix}_close_vs_ema9":         g("close_vs_ema9") * d,
+        f"{prefix}_ema9_slope":            g("ema9_slope") * d,
+        f"{prefix}_bb_pct_b":              g("bb_pct_b", 0.5) if d==1 else 1 - g("bb_pct_b", 0.5),
+        f"{prefix}_bb_width":              g("bb_width"),
+        f"{prefix}_rsi14":                 g("rsi14", 50) if d==1 else 100 - g("rsi14", 50),
+        f"{prefix}_stoch_k":               g("stoch_k", 50) if d==1 else 100 - g("stoch_k", 50),
+        f"{prefix}_will_r":                g("will_r", -50) if d==1 else -100 - g("will_r", -50),
+        f"{prefix}_is_bullish":            int(hist.loc[i,"is_bull"]) if d==1 else 1-int(hist.loc[i,"is_bull"]),
+        f"{prefix}_body_ratio":            g("body_ratio"),
+        f"{prefix}_range_vs_atr":          g("range_vs_atr", 1),
+        f"{prefix}_close_pos":             g("close_pos") if d==1 else 1 - g("close_pos"),
+        f"{prefix}_signal_active":         sig_active,
+        f"{prefix}_vol_ratio":             g("vol_ratio", 1),
+        f"{prefix}_adx":                   g("adx"),
+        # ── NEW: matching NIFTY features ─────────────────────────
+        f"{prefix}_bb_lower_breach_atr":   round(bb_breach, 6),
+        f"{prefix}_lower_wick_ratio":      round(lwr, 6),
+        f"{prefix}_dist_to_prev_high_atr": round(dist_prev_high, 6),
+        f"{prefix}_dist_to_prev_low_atr":  round(dist_prev_low, 6),
+        f"{prefix}_room_to_tgt3":          round(room_tgt3, 6),
     }
     return feats, sig_active
 
