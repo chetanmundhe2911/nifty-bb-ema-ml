@@ -169,17 +169,6 @@ def print_signal(row, is_new=True):
         )
         send_telegram(msg)
 
-def send_telegram(msg: str):
-    """Send BUY signal notification to Telegram."""
-    try:
-        import requests
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
-        )
-    except Exception as e:
-        print(f"{RED}Telegram error: {e}{RESET}")
-
 
 def save_signals_csv(df, date_str):
     os.makedirs(LOG_DIR, exist_ok=True)
