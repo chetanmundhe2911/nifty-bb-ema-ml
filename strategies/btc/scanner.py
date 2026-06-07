@@ -43,23 +43,8 @@ def send_telegram(msg):
         print("{}Telegram error: {}{}".format(RED, e, RESET))
 
 
-def get_candles(limit=300):
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": "BTCUSDT", "interval": "1m", "limit": limit}
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    data = r.json()
-    df = pd.DataFrame(data, columns=[
-        "timestamp","open","high","low","close","volume",
-        "close_time","quote_vol","trades","taker_base","taker_quote","ignore"
-    ])
-    df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df["O"] = df["open"].astype(float)
-    df["H"] = df["high"].astype(float)
-    df["L"] = df["low"].astype(float)
-    df["C"] = df["close"].astype(float)
-    df["volume"] = df["volume"].astype(float)
-    return df[["datetime","O","H","L","C","volume"]].reset_index(drop=True)
+from strategies.btc.feeds.binance_feed import get_candles
+# from strategies.btc.feeds.delta_feed import get_candles  # switch here for Delta
 
 
 def score_signals(df_candles, model, feat_cols):
