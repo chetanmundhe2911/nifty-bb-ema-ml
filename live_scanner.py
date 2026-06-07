@@ -36,35 +36,6 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = "8725357996:AAHJbUVxY6huX8SEgUFhRCYdzIW8MgqXpLg"
 TELEGRAM_CHAT_ID   = "7804862044"
 
-def send_telegram(msg: str):
-    """Send message to Telegram."""
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
-        )
-    except Exception as e:
-        print(f"Telegram error: {e}")
-
-# ── config ────────────────────────────────────────────────────────────────────
-MODEL_PATH   = "models/v2/signal_model_v2.pkl"
-LOG_DIR      = "logs"
-DATA_DIR     = "data/raw"
-POLL_SECONDS = 60
-START_HOUR   = 9
-START_MIN    = 45
-END_HOUR     = 15
-END_MIN      = 15
-
-# ── colours ───────────────────────────────────────────────────────────────────
-GREEN  = "\033[92m"
-RED    = "\033[91m"
-YELLOW = "\033[93m"
-CYAN   = "\033[96m"
-BOLD   = "\033[1m"
-RESET  = "\033[0m"
-
-
 def load_model(path):
     bundle    = pickle.load(open(path, "rb"))
     model     = bundle["model"]
@@ -120,6 +91,35 @@ def get_exit_guidance(pattern: str, prob: float) -> str:
         "E_unclear":      f"{YELLOW}WATCH → classify after bar 2{RESET}",
     }
     return rules.get(pattern, f"{YELLOW}WATCH{RESET}")
+
+
+def send_telegram(msg: str):
+    """Send message to Telegram."""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
+        )
+    except Exception as e:
+        print(f"Telegram error: {e}")
+
+# ── config ────────────────────────────────────────────────────────────────────
+MODEL_PATH   = "models/v2/signal_model_v2.pkl"
+LOG_DIR      = "logs"
+DATA_DIR     = "data/raw"
+POLL_SECONDS = 60
+START_HOUR   = 9
+START_MIN    = 45
+END_HOUR     = 15
+END_MIN      = 15
+
+# ── colours ───────────────────────────────────────────────────────────────────
+GREEN  = "\033[92m"
+RED    = "\033[91m"
+YELLOW = "\033[93m"
+CYAN   = "\033[96m"
+BOLD   = "\033[1m"
+RESET  = "\033[0m"
 
 
 def print_signal(row, is_new=True):
