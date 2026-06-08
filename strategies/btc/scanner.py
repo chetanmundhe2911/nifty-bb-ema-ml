@@ -80,7 +80,7 @@ def score_signals(df_candles, model, feat_cols):
 
     df = pd.DataFrame(records)
     df["datetime"] = pd.to_datetime(df["datetime"])
-    df = df[df["risk_pct"] >= RISK_FILTER].copy()
+    df = df[(df["risk_pct"] >= RISK_FILTER) & (df["signal_type"] == "BUY")].copy()
     if df.empty:
         return pd.DataFrame()
 
