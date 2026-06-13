@@ -9,7 +9,7 @@ Delta Exchange feed.
 
 import os, sys, time, requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -18,7 +18,6 @@ TELEGRAM_BOT_TOKEN = "8725357996:AAHJbUVxY6huX8SEgUFhRCYdzIW8MgqXpLg"
 TELEGRAM_CHAT_ID   = "7804862044"
 POLL_SECONDS       = 60
 CANDLES_1M         = 300
-RISK_FILTER        = 0.15
 RR                 = 3
 
 # -- COLOURS ------------------------------------------------------------------
@@ -60,18 +59,18 @@ def get_delta_candles(resolution, limit=300):
 
 
 def get_regime():
-    """Get 1H regime — True=Bull(BUY only), False=Bear(SELL only)"""
+    """Get 1H regime based on PREVIOUS CLOSED candle vs EMA9"""
     df = get_delta_candles("1h", limit=50)
     if df.empty or len(df) < 10:
-        return None, None
+        return None, None, None
     df["ema9"] = df["C"].ewm(span=9, adjust=False).mean()
-    last = df.iloc[-2]
-    bull = last["C"] > last["ema9"]
-    return bull, last["C"], last["ema9"]
+    prev = df.iloc[-2]
+    bull = prev["C"] > prev["ema9"]
+    return bull, prev["C"], prev["ema9"]
 
 
 def detect_signals(df):
-    """Detect BB+EMA9 BUY and SELL signals."""
+    """Detect BB+EMA9 BUY and SELL signals — no risk filter."""
     df = df.copy()
 
     # BB(20,2)
@@ -83,7 +82,7 @@ def detect_signals(df):
     # EMA9
     df["ema9"] = df["C"].ewm(span=9, adjust=False).mean()
 
-    signals = []
+    signals    = []
     armed_buy  = False
     armed_sell = False
 
@@ -98,38 +97,34 @@ def detect_signals(df):
         if row["H"] >= row["bb_upper"]:
             armed_sell = True
 
-        # BUY signal
+        # BUY signal — no risk filter
         if armed_buy and row["C"] > row["ema9"]:
-            entry   = row["C"]
-            sl      = row["L"]
-            risk    = entry - sl
-            risk_pct = risk / entry * 100
-            if risk_pct >= RISK_FILTER:
-                signals.append({
-                    "datetime":   row["datetime"],
-                    "type":       "BUY",
-                    "entry":      round(entry, 2),
-                    "sl":         round(sl, 2),
-                    "target":     round(entry + risk * RR, 2),
-                    "risk_pct":   round(risk_pct, 3),
-                })
+            entry = row["C"]
+            sl    = row["bb_lower"]   # use BB lower as SL
+            risk  = entry - sl
+            signals.append({
+                "datetime": row["datetime"],
+                "type":     "BUY",
+                "entry":    round(entry, 2),
+                "sl":       round(sl, 2),
+                "target":   round(entry + risk * RR, 2),
+                "risk_pct": round(risk / entry * 100, 3),
+            })
             armed_buy = False
 
-        # SELL signal
+        # SELL signal — no risk filter
         if armed_sell and row["C"] < row["ema9"]:
-            entry    = row["C"]
-            sl       = row["H"]
-            risk     = sl - entry
-            risk_pct = risk / entry * 100
-            if risk_pct >= RISK_FILTER:
-                signals.append({
-                    "datetime":   row["datetime"],
-                    "type":       "SELL",
-                    "entry":      round(entry, 2),
-                    "sl":         round(sl, 2),
-                    "target":     round(entry - risk * RR, 2),
-                    "risk_pct":   round(risk_pct, 3),
-                })
+            entry = row["C"]
+            sl    = row["bb_upper"]   # use BB upper as SL
+            risk  = sl - entry
+            signals.append({
+                "datetime": row["datetime"],
+                "type":     "SELL",
+                "entry":    round(entry, 2),
+                "sl":       round(sl, 2),
+                "target":   round(entry - risk * RR, 2),
+                "risk_pct": round(risk / entry * 100, 3),
+            })
             armed_sell = False
 
     return signals
@@ -141,16 +136,16 @@ def main():
     print("{}{}".format("="*60, RESET))
     print("  Feed      : Delta Exchange")
     print("  Timeframe : 1-min")
-    print("  Regime    : 1H EMA9 filter")
+    print("  Regime    : 1H EMA9 (previous closed candle)")
     print("  RR        : 1:{}".format(RR))
-    print("  Risk min  : {}%".format(RISK_FILTER))
+    print("  Risk filter: NONE — all signals fire")
     print("  Poll      : every {}s".format(POLL_SECONDS))
     print("{}{}\n".format(BOLD, "="*60 + RESET))
 
     send_telegram(
         "<b>BTC Simple Scanner started</b>\n"
         "Feed: Delta | BB+EMA9 | 1H regime filter\n"
-        "RR: 1:{} | Risk >= {}%".format(RR, RISK_FILTER)
+        "RR: 1:{} | No risk filter — all signals".format(RR)
     )
 
     seen_signals = set()
@@ -177,10 +172,11 @@ def main():
                 time.sleep(POLL_SECONDS)
                 continue
 
-            # Detect signals
+            # Detect all signals
             signals = detect_signals(df)
 
-            # Filter by regime
+            # Filter by regime and alert
+            latest = df["datetime"].max()
             for sig in signals:
                 sig_key = str(sig["datetime"]) + sig["type"]
                 if sig_key in seen_signals:
@@ -195,7 +191,6 @@ def main():
                 seen_signals.add(sig_key)
 
                 # Only alert recent signals (last 5 mins)
-                latest = df["datetime"].max()
                 if sig["datetime"] < latest - pd.Timedelta(minutes=5):
                     continue
 
@@ -207,17 +202,17 @@ def main():
                         "Entry  : ${:,.2f}\n"
                         "SL     : ${:,.2f}\n"
                         "Target : ${:,.2f} (1:{})\n"
-                        "Risk   : {:.2f}%\n"
+                        "Risk   : {:.3f}%\n"
                         "Regime : {}"
                     ).format(sig["datetime"], sig["entry"], sig["sl"],
                              sig["target"], RR, sig["risk_pct"], regime_str)
                     send_telegram(msg)
-                    print("\n{}{} BUY {}{}".format(BOLD, GREEN, RESET, RESET))
-                    print("  Time  : {}".format(sig["datetime"]))
-                    print("  Entry : {}${:,.2f}{}".format(GREEN, sig["entry"], RESET))
-                    print("  SL    : ${:,.2f}".format(sig["sl"]))
-                    print("  T{}    : ${:,.2f}".format(RR, sig["target"]))
-                    print("  Risk  : {:.2f}%".format(sig["risk_pct"]))
+                    print("\n{}{} BUY SIGNAL {}{}".format(BOLD, GREEN, RESET, RESET))
+                    print("  Time   : {}".format(sig["datetime"]))
+                    print("  Entry  : {}${:,.2f}{}".format(GREEN, sig["entry"], RESET))
+                    print("  SL     : ${:,.2f}".format(sig["sl"]))
+                    print("  Target : ${:,.2f}".format(sig["target"]))
+                    print("  Risk   : {:.3f}%".format(sig["risk_pct"]))
 
                 else:
                     sell_count += 1
@@ -227,19 +222,19 @@ def main():
                         "Entry  : ${:,.2f}\n"
                         "SL     : ${:,.2f}\n"
                         "Target : ${:,.2f} (1:{})\n"
-                        "Risk   : {:.2f}%\n"
+                        "Risk   : {:.3f}%\n"
                         "Regime : {}"
                     ).format(sig["datetime"], sig["entry"], sig["sl"],
                              sig["target"], RR, sig["risk_pct"], regime_str)
                     send_telegram(msg)
-                    print("\n{}{} SELL {}{}".format(BOLD, RED, RESET, RESET))
-                    print("  Time  : {}".format(sig["datetime"]))
-                    print("  Entry : {}${:,.2f}{}".format(RED, sig["entry"], RESET))
-                    print("  SL    : ${:,.2f}".format(sig["sl"]))
-                    print("  T{}    : ${:,.2f}".format(RR, sig["target"]))
-                    print("  Risk  : {:.2f}%".format(sig["risk_pct"]))
+                    print("\n{}{} SELL SIGNAL {}{}".format(BOLD, RED, RESET, RESET))
+                    print("  Time   : {}".format(sig["datetime"]))
+                    print("  Entry  : {}${:,.2f}{}".format(RED, sig["entry"], RESET))
+                    print("  SL     : ${:,.2f}".format(sig["sl"]))
+                    print("  Target : ${:,.2f}".format(sig["target"]))
+                    print("  Risk   : {:.3f}%".format(sig["risk_pct"]))
 
-            now   = datetime.utcnow().strftime("%H:%M:%S")
+            now   = datetime.now(timezone.utc).strftime("%H:%M:%S")
             price = float(df["C"].iloc[-1])
             print(
                 "\r  [{} UTC]  BTC ${:,.0f}  |  Regime: {}  |  {}BUY:{}{}  {}SELL:{}{}  ".format(
