@@ -4,7 +4,8 @@ strategies/btc/simple_scanner.py
 ---------------------------------
 Simple BB+EMA9 Buy/Sell scanner with 1H regime filter.
 No ML model — pure rule based.
-Delta Exchange feed.
+1-min feed: Binance (accurate, no duplicates)
+1H regime : Delta Exchange (previous closed candle vs EMA9)
 """
 
 import os, sys, time, requests
@@ -39,32 +40,44 @@ def send_telegram(msg):
         print("Telegram error: {}".format(e))
 
 
-def get_delta_candles(resolution, limit=300):
-    end   = int(time.time())
-    start = end - limit * (60 if resolution == '1m' else 3600)
-    url   = "https://api.delta.exchange/v2/history/candles"
-    params = {"resolution": resolution, "symbol": "BTCUSDT", "start": start, "end": end}
-    r = requests.get(url, params=params, timeout=10)
+def get_binance_candles(limit=300):
+    """Fetch 1-min candles from Binance — clean, no duplicates."""
+    r = requests.get(
+        "https://api.binance.com/api/v3/klines",
+        params={"symbol": "BTCUSDT", "interval": "1m", "limit": limit},
+        timeout=10
+    )
     r.raise_for_status()
-    result = r.json().get("result", [])
-    if not result:
-        return pd.DataFrame()
-    df = pd.DataFrame(result)
-    df["datetime"] = pd.to_datetime(df["time"], unit="s")
+    data = r.json()
+    df = pd.DataFrame(data, columns=[
+        "timestamp","open","high","low","close","volume",
+        "close_time","quote_vol","trades","taker_base","taker_quote","ignore"
+    ])
+    df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms")
     df["O"] = df["open"].astype(float)
     df["H"] = df["high"].astype(float)
     df["L"] = df["low"].astype(float)
     df["C"] = df["close"].astype(float)
-    return df[["datetime","O","H","L","C"]].sort_values("datetime").reset_index(drop=True)
+    return df[["datetime","O","H","L","C"]].reset_index(drop=True)
 
 
 def get_regime():
-    """Get 1H regime based on PREVIOUS CLOSED candle vs EMA9"""
-    df = get_delta_candles("1h", limit=50)
-    if df.empty or len(df) < 10:
+    """Get 1H regime from Delta — previous CLOSED candle vs EMA9."""
+    end   = int(time.time())
+    start = end - 50 * 3600
+    url   = "https://api.delta.exchange/v2/history/candles"
+    params = {"resolution": "1h", "symbol": "BTCUSDT", "start": start, "end": end}
+    r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
+    result = r.json().get("result", [])
+    if not result or len(result) < 10:
         return None, None, None
+    df = pd.DataFrame(result)
+    df["datetime"] = pd.to_datetime(df["time"], unit="s")
+    df["C"] = df["close"].astype(float)
+    df = df.sort_values("datetime").reset_index(drop=True)
     df["ema9"] = df["C"].ewm(span=9, adjust=False).mean()
-    prev = df.iloc[-2]
+    prev = df.iloc[-2]  # previous CLOSED candle
     bull = prev["C"] > prev["ema9"]
     return bull, prev["C"], prev["ema9"]
 
@@ -97,10 +110,10 @@ def detect_signals(df):
         if row["H"] >= row["bb_upper"]:
             armed_sell = True
 
-        # BUY signal — no risk filter
+        # BUY signal
         if armed_buy and row["C"] > row["ema9"]:
             entry = row["C"]
-            sl    = row["bb_lower"]   # use BB lower as SL
+            sl    = row["bb_lower"]
             risk  = entry - sl
             signals.append({
                 "datetime": row["datetime"],
@@ -112,10 +125,10 @@ def detect_signals(df):
             })
             armed_buy = False
 
-        # SELL signal — no risk filter
+        # SELL signal
         if armed_sell and row["C"] < row["ema9"]:
             entry = row["C"]
-            sl    = row["bb_upper"]   # use BB upper as SL
+            sl    = row["bb_upper"]
             risk  = sl - entry
             signals.append({
                 "datetime": row["datetime"],
@@ -134,18 +147,17 @@ def main():
     print("\n{}{}".format(BOLD, "="*60))
     print("  BTC BB+EMA9 SIMPLE SCANNER — BUY + SELL")
     print("{}{}".format("="*60, RESET))
-    print("  Feed      : Delta Exchange")
-    print("  Timeframe : 1-min")
-    print("  Regime    : 1H EMA9 (previous closed candle)")
-    print("  RR        : 1:{}".format(RR))
+    print("  1-min feed : Binance")
+    print("  1H regime  : Delta Exchange (prev closed candle)")
+    print("  RR         : 1:{}".format(RR))
     print("  Risk filter: NONE — all signals fire")
-    print("  Poll      : every {}s".format(POLL_SECONDS))
+    print("  Poll       : every {}s".format(POLL_SECONDS))
     print("{}{}\n".format(BOLD, "="*60 + RESET))
 
     send_telegram(
         "<b>BTC Simple Scanner started</b>\n"
-        "Feed: Delta | BB+EMA9 | 1H regime filter\n"
-        "RR: 1:{} | No risk filter — all signals".format(RR)
+        "1-min: Binance | 1H regime: Delta\n"
+        "BB+EMA9 | RR: 1:{} | All signals".format(RR)
     )
 
     seen_signals = set()
@@ -166,13 +178,13 @@ def main():
 
             regime_str = "BULL - BUY only" if bull else "BEAR - SELL only"
 
-            # Get 1-min candles
-            df = get_delta_candles("1m", limit=CANDLES_1M)
+            # Get 1-min candles from Binance
+            df = get_binance_candles(CANDLES_1M)
             if df.empty:
                 time.sleep(POLL_SECONDS)
                 continue
 
-            # Detect all signals
+            # Detect signals
             signals = detect_signals(df)
 
             # Filter by regime and alert
