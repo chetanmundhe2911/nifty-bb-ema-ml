@@ -65,7 +65,7 @@ def get_regime():
     if df.empty or len(df) < 10:
         return None, None
     df["ema9"] = df["C"].ewm(span=9, adjust=False).mean()
-    last = df.iloc[-1]
+    last = df.iloc[-2]
     bull = last["C"] > last["ema9"]
     return bull, last["C"], last["ema9"]
 
